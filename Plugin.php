@@ -15,6 +15,13 @@ class Plugin extends \AldirBlanc\PluginValidador
 
             // se true, só exporta as inscrições 
             'exportador_requer_validacao' => ['dataprev'],
+
+            //Configura a coluna de monoparental no exportador de validação financeira
+            'coluna_mulher_mono_parental' => [
+                'status' => true,//<= Setar como true caso queira ativar a impressão da coluna que informa se é monoparental ou não no exportador financeiiro ou false para manter desativado
+                'tipo_busca' => 'id',//<= Setar como deve ser feita a pesquisa. (name = nome do campo) ou  (id = id do campo)
+                'referencia' => 00 //<= setar aqui o ID do campo ou nome do campo " ATENÇAO, escolha ID, NÃO INFORMAR o texto field, apenas o ID"
+            ]
         ];
         $this->_config = $config;
         parent::__construct($config);
@@ -50,6 +57,36 @@ class Plugin extends \AldirBlanc\PluginValidador
             }
         });
 
+        // atualiza os metadados legados para o novo formato requerido
+        if (!$app->repo('DbUpdate')->findBy(['name' => 'update registration_meta financeiro'])) {
+            $conn = $app->em->getConnection();
+            $conn->beginTransaction();
+            
+            $slug = $this->getSlug();
+            $conn->executeQuery("
+                UPDATE 
+                    registration_meta 
+                SET 
+                    value = CONCAT('[\"',value,'\"]') 
+                WHERE 
+                    key = '{$slug}_filename'");
+                    
+            $conn->executeQuery("
+                UPDATE 
+                    registration_meta 
+                SET 
+                    value = CONCAT('[',value,']') 
+                WHERE 
+                    key = '{$slug}_raw'");
+
+            $app->disableAccessControl();
+            $db_update = new \MapasCulturais\Entities\DbUpdate;
+            $db_update->name = 'update registration_meta financeiro';
+            $db_update->save(true);
+            $app->enableAccessControl();
+            $conn->commit();
+        }
+
         parent::_init();
     }
 
@@ -67,25 +104,19 @@ class Plugin extends \AldirBlanc\PluginValidador
 
         $this->registerRegistrationMetadata($slug . '_filename', [
             'label' => 'Nome do arquivo de retorno do validador financeiro',
-            'type' => 'string',
+            'type' => 'json',
             'private' => true,
+            'default_value' => '[]'
         ]);
 
         $this->registerRegistrationMetadata($slug . '_raw', [
             'label' => 'Validador Financeiro raw data (csv row)',
             'type' => 'json',
             'private' => true,
-            'default_value' => '{}'
+            'default_value' => '[]'
         ]);
 
-        $this->registerRegistrationMetadata($slug . '_processed', [
-            'label' => 'Validador Financeiro processed data',
-            'type' => 'json',
-            'private' => true,
-            'default_value' => '{}'
-        ]);
-
-        $file_group_definition = new \MapasCulturais\Definitions\FileGroup($slug, ['^text/csv$'], 'O arquivo enviado não é um csv.',false,null,true);
+        $file_group_definition = new \MapasCulturais\Definitions\FileGroup($slug);
         $app->registerFileGroup('opportunity', $file_group_definition);
 
         parent::register();
